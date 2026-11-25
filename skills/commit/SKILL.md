@@ -118,7 +118,9 @@ logical-commit guard is **bypassed** — explicit user intent wins.
    - Remember whether **you** ran `git add -A` (call it `weStaged`).
      This matters for the refusal flow below.
 4. Run `git -C <repo> diff --cached` to read the staged changes.
-5. **Check that the staged set is one logical change.** See "Logical commits"
+5. **Check for unresolved agent marks.** See "Agent marks guard" below.
+   If any remain, stop without committing.
+6. **Check that the staged set is one logical change.** See "Logical commits"
    below.
    - If it is **not** one logical change → stop.
      - If `weStaged` is true: run `git -C <repo> reset` to undo the staging
@@ -127,15 +129,39 @@ logical-commit guard is **bypassed** — explicit user intent wins.
        the index intact** so they don't lose their selection.
      Then report a suggested split to the user (see "Refusal flow").
      **Do not commit.**
-6. Pick exactly one of `chore` / `feat` / `fix` based on the diff:
+7. Pick exactly one of `chore` / `feat` / `fix` based on the diff:
    - Adding new functionality the user can use → `feat`
    - Correcting incorrect behavior → `fix`
    - Anything else (config, docs, refactor, deps, dotfiles, CI) → `chore`
-7. Pick a scope when one is obvious from the paths (e.g., `auth`, `ci`, `nvim`, `aws-guard`). If multiple unrelated areas changed, omit the scope.
-8. Write the description. Imperative mood ("add", not "added"). Keep it under ~50 chars.
-9. Run `git -C <repo> commit -m "<message>"`.
-10. Print the resulting commit subject and short hash. Mention the repo if
+8. Pick a scope when one is obvious from the paths (e.g., `auth`, `ci`, `nvim`, `aws-guard`). If multiple unrelated areas changed, omit the scope.
+9. Write the description. Imperative mood ("add", not "added"). Keep it under ~50 chars.
+10. Run `git -C <repo> commit -m "<message>"`.
+11. Print the resulting commit subject and short hash. Mention the repo if
     it differs from cwd.
+
+## Agent marks guard
+
+An `agent:` or `agent?` comment in the staged diff means an agent review
+is unfinished. Never commit while one remains.
+
+Run on the staged diff:
+
+```
+git -C <repo> diff --cached -U0 | \
+  grep -nE '^\+.*(#|//|--|;|/\*|<!--)[[:space:]]*#?[[:space:]]*[Aa][Gg][Ee][Nn][Tt][:?][[:space:]]'
+```
+
+If the command finds any line, stop and tell the user:
+
+- List each `+` match as `path:line  <content>` (re-run `rg` on the working
+  tree to get the file paths).
+- Say: `Unresolved agent marks in staged diff. Run the agent-review skill
+  or remove them, then re-run /commit.`
+- If `weStaged` is true, run `git -C <repo> reset` first so the user
+  starts clean. If false, leave the index intact.
+
+The guard applies with and without arguments. The user's explicit
+`/commit <message>` still refuses while marks remain.
 
 Allowed commands: `git status`, `git diff`, `git log`, `git add`, `git reset`,
 `git commit`, `git rev-parse`, `find` (only with the form

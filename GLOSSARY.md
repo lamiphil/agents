@@ -68,6 +68,20 @@ _Avoid_: todo file, global todo
 **Todo declaration**:
 A statement in an `AGENTS.md` that gives a workspace's todo list, its archive, its sections rule and whether it syncs through git. The nearest `AGENTS.md` wins; without one, no todo is written.
 
+## Agent review
+
+**Agent mark**:
+A short instruction written as a code comment, starting with `agent:` (case-insensitive), that tells an agent what to change here. `#agent` without a colon is accepted only when `#` is the language's comment prefix.
+_Avoid_: agent comment, TODO, FIXME
+
+**Agent question**:
+The `agent?` form of a mark. Used when an agent answers a question inline or cannot apply an instruction. It stays in the file for the user to resolve, and blocks commits.
+_Avoid_: unresolved mark, agent reply
+
+**Agent review**:
+One pass that finds every agent mark in the working tree, applies each instruction, and removes the mark. A failed or question mark becomes an `agent?` for the user.
+_Avoid_: agent sweep, mark review
+
 ## Setup
 
 **Bootstrap script**:
