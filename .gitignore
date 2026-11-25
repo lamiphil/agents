@@ -1,0 +1,10 @@
+# Vooban skills: kept in this folder, never published (one per line, used by install.sh)
+skills/scrum/
+skills/vooban-artifact/
+skills/deployment-progress-diagram/
+
+# Project log at repo root (never tracked)
+/_log.md
+
+__pycache__/
+.DS_Store

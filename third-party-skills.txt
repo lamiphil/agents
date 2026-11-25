@@ -1,0 +1,19 @@
+# Third-party skills: <source> <skill>. install.sh adds each missing one
+# with `npx skills add <source> --skill <skill> -g -y`.
+anthropics/skills skill-creator
+vercel-labs/skills find-skills
+greptileai/skills greploop
+Agents365-ai/drawio-skill drawio-skill
+ayghri/i-have-adhd i-have-adhd
+humanlayer/skills show-me
+janestreet/agent_skills socratic-tutor
+boristane/agent-skills logging-best-practices
+kepano/obsidian-skills defuddle
+kepano/obsidian-skills json-canvas
+kepano/obsidian-skills knap
+kepano/obsidian-skills obsidian-bases
+kepano/obsidian-skills obsidian-cli
+kepano/obsidian-skills obsidian-markdown
+mattpocock/skills grilling
+mattpocock/skills domain-modeling
+mattpocock/skills grill-with-docs

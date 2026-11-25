@@ -1,0 +1,57 @@
+<!-- Reference fragment: goes inside <main class="pi-shell">. -->
+<header class="pi-header">
+  <div>
+    <span class="pf-eyebrow">Architecture</span>
+    <h1 class="pi-title">Request path</h1>
+    <p class="pi-subtitle">From a browser to the content, <span class="highlight">one environment</span>.</p>
+  </div>
+</header>
+
+<section class="vd-canvas">
+  <h2 class="vd-title">Request path: browser to content</h2>
+  <p class="vd-subtitle">The edge is the only entry point; the app reads content at build time.</p>
+
+  <div class="vd-layout">
+    <svg class="vd-edges" aria-hidden="true" data-edges='[
+      {"from":"browser","to":"cdn","kind":"call","label":"HTTPS","step":1},
+      {"from":"cdn","to":"app","kind":"call","label":"miss","step":2},
+      {"from":"content","to":"app","kind":"data","step":3},
+      {"from":"app","to":"mail","kind":"telemetry","label":"contact form","step":4,"route":"under","lane":21}
+    ]'></svg>
+
+    <div class="vd-zone vd-source">
+      <p class="vd-zone-title">Visitors</p>
+      <div class="vd-node" id="browser">Browser<span class="vd-sub">en / fr</span></div>
+    </div>
+
+    <div class="vd-zone vd-cloud">
+      <p class="vd-zone-title">Hosting</p>
+      <div class="vd-row">
+        <div class="vd-col">
+          <div class="vd-node" id="cdn">Edge / CDN<span class="vd-sub">static cache</span></div>
+          <div class="vd-node" id="app">Next.js app<span class="vd-sub">App Router</span></div>
+        </div>
+        <div class="vd-zone vd-shared">
+          <p class="vd-zone-title">Content</p>
+          <div class="vd-node" id="content">Markdown<span class="vd-sub">content/</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="vd-zone vd-external">
+      <p class="vd-zone-title">External</p>
+      <div class="vd-node vd-external" id="mail">Mail API<span class="vd-sub">contact</span></div>
+    </div>
+
+    <aside class="vd-zone vd-plain vd-dataflow">
+      <p class="vd-zone-title">Dataflow</p>
+      <ol class="vd-steps">
+        <li><span class="vd-badge">1</span>The browser hits the edge over HTTPS.</li>
+        <li><span class="vd-badge">2</span>On a cache miss the edge calls the app.</li>
+        <li><span class="vd-badge vd-badge-data">3</span>Markdown content is compiled into pages at build time.</li>
+        <li><span class="vd-badge vd-badge-quiet">4</span>The contact form posts to an external mail API.</li>
+      </ol>
+      <p class="vd-footnote">Green: request path. Amber: data. Grey dashed: side calls.</p>
+    </aside>
+  </div>
+</section>
