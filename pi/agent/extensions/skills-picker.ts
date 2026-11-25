@@ -45,7 +45,7 @@ interface Category {
 
 function readDefaults(): string[] {
 	if (!existsSync(DEFAULTS_FILE)) {
-		return ["commit", "log", "todo", "find-skills", "skill-creator", "reflect"];
+		return ["commit", "log", "todo", "find-skills", "agent-review"];
 	}
 	try {
 		const raw = JSON.parse(readFileSync(DEFAULTS_FILE, "utf8")) as { defaults?: unknown };
