@@ -1,0 +1,14 @@
+{
+	"$schema": "./skill-picker.schema.json",
+	"_doc": "Skills always on for a fresh session. Entries starting with '@' are categories resolved against ~/.agents/skill-categories. The /skills picker lets you turn any other skill on for the current session. /skill:name keeps working for skills that are off.",
+	"defaults": [
+		"commit",
+		"log",
+		"todo",
+		"find-skills",
+		"skill-creator",
+		"reflect",
+		"refresh-memory",
+		"agent-review"
+	]
+}
