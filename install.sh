@@ -54,3 +54,8 @@ if [ -f "$npm_dir/package.json" ] && command -v npm >/dev/null; then
 else
   echo "Pi packages not installed yet: start pi once, then rerun ./install.sh"
 fi
+
+# 5. macOS-only: weekly Pi sessions clean-up LaunchAgent.
+if [ "$(uname)" = "Darwin" ]; then
+  bash "$repo/pi/agent/scripts/apply.sh" || echo "pi-clean-sessions install failed" >&2
+fi

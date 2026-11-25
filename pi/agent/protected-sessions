@@ -1,0 +1,4 @@
+# Pi session ids protected from the weekly clean-up.
+# Managed by /protect and /unprotect. One UUID per line. `#` for comments.
+
+01a1ef79-4291-770e-8da8-f3068e47af7b
