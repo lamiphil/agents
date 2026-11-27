@@ -21,6 +21,11 @@
  *   level (rush / oracle / omnissiah), a title and a brief. The tab then starts with the
  *   model + thinking for that level on the master's provider (same table as agent-modes.ts).
  *   /task --rush|--oracle|--omnissiah <text> skips the analysis.
+ * Multi: when the text is a pure todo-number list or range ("1, 2 and 3", "1 to 4", "1-4")
+ *   each number is replaced by its item's text from the ## Todo list declared for cwd (same
+ *   rule as todo/scripts/resolve.py). One analysis turn asks the master to call
+ *   delegate_task once per task, in order; each tab opens with its own brief and level.
+ *   Level flags are rejected when the list expands to more than one task.
  * /reply [task] <text>: send text to a task without switching tabs. No args lists tasks.
  * /settle [task]: close a task. In the master it targets one task (optional if only one);
  *   in a task tab it closes that tab. The task first reports done and writes its /log
@@ -137,6 +142,75 @@ Then call delegate_task once with:
 - brief: what the task agent must do, with the key facts, files and constraints you found, and what "done" means.
 - why: one short reason for the level.
 After the tool call, stop. No summary.`;
+
+const ANALYSIS_MULTI = (tasks: string[]) => `${ANALYSIS_PREFIX}[multi] Delegate each task below to its own task session.
+
+${tasks.map((t, i) => `Task ${i + 1}: ${t}`).join("\n")}
+
+For each task do a quick analysis separately: read at most what is strictly needed to judge it (for example a ticket it names). Do not start the work.
+
+Call delegate_task exactly ${tasks.length} times, in order (task 1 first, then task 2, and so on). For each call set:
+- level: rush for small, clear, mechanical work; oracle for normal multi-step work; omnissiah for ambiguous, risky, architectural or hard-debugging work.
+- title: 2-5 words naming the actual work, ticket ID first when there is one.
+- brief: what the task agent must do, with the key facts, files and constraints you found, and what "done" means.
+- why: one short reason for the level.
+After the ${tasks.length} calls, stop. No summary.`;
+
+// Parse todo-number patterns inside the /task text: "1", "1, 2 and 3", "1 to 4", "1-4", "1, 3 to 5 and 7".
+// Leading verbs ("work on", "do", "handle"…) and nouns ("task", "todo", "item") are stripped so
+// "work on task 1, 2 and 3" matches. Returns null when the trimmed text isn't a pure number list.
+function parseTodoNumbers(text: string): number[] | null {
+	let s = text.trim();
+	s = s.replace(/^(?:(?:work on|do|handle|tackle|take care of|take|please(?:\s+do)?)\s+)+/i, "");
+	s = s.replace(/^(?:todos?|tasks?|items?|numbers?)\s+/i, "");
+	s = s.replace(/\s+(?:please|now)\s*$/i, "").trim();
+	if (!s) return null;
+	const parts = s.split(/\s*,\s*|\s+and\s+/).map((p) => p.trim()).filter(Boolean);
+	const nums = new Set<number>();
+	for (const p of parts) {
+		const m = p.match(/^(\d+)(?:\s*(?:-|to)\s*(\d+))?$/);
+		if (!m) return null;
+		const a = +m[1];
+		const b = m[2] ? +m[2] : a;
+		if (a < 1 || b < a || b - a > 100) return null;
+		for (let n = a; n <= b; n++) nums.add(n);
+	}
+	return nums.size ? [...nums].sort((x, y) => x - y) : null;
+}
+
+// Find the ## Todo list declared for <cwd> (same rule as todo/scripts/resolve.py, kept in sync).
+function resolveTodoList(cwd: string): string | undefined {
+	const home = homedir();
+	let d = resolve(cwd);
+	while (true) {
+		for (const name of ["AGENTS.md", "CLAUDE.md"]) {
+			const f = join(d, name);
+			if (!existsSync(f)) continue;
+			const text = readFileSync(f, "utf8");
+			const section = text.match(/^## Todo\s*$([\s\S]*?)(?=^## |\Z)/m);
+			if (section) {
+				const list = section[1].match(/^\s*-\s*\*\*List\*\*:\s*(.+?)\s*$/m);
+				const p = list?.[1].match(/`([^`]+)`/);
+				if (p) return resolve(d, p[1].replace(/^~(?=\/)/, home));
+			}
+			break; // only the first AGENTS/CLAUDE per folder counts
+		}
+		const parent = resolve(d, "..");
+		if (d === home || parent === d) return undefined;
+		d = parent;
+	}
+}
+
+// Read "<status> <n>: text" lines (status = "!!", "!", "X" or blank), drop the "(waiting on: ...)" tail.
+function readTodoItems(listPath: string): Map<number, string> {
+	const items = new Map<number, string>();
+	if (!existsSync(listPath)) return items;
+	for (const line of readFileSync(listPath, "utf8").split("\n")) {
+		const m = line.match(/^\s*(?:!!|!|X)?\s*(\d+):\s*(.+?)\s*$/);
+		if (m) items.set(+m[1], m[2].replace(/\s*\(waiting on:[^)]*\)\s*$/i, "").trim());
+	}
+	return items;
+}
 
 type Window = { window_id: string; label?: string; layers?: unknown[] };
 type Meta = {
@@ -317,37 +391,52 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	// Filled by delegate_task, spawned once the master's turn settles so the fork sees a complete session.
-	let pendingDelegation: Delegation | undefined;
-	let analysing: string | undefined;
+	// `analysing.tasks` has one text per expected delegation (length 1 for a plain /task, >1 for multi).
+	let analysing: { tasks: string[] } | undefined;
+	let pendingDelegations: Delegation[] = [];
 
 	pi.registerCommand("task", {
-		description: "Delegate a sub-task to a new Rex tab; the master picks its level. /task [--rush|--oracle|--omnissiah] <text>",
+		description: "Delegate a sub-task to a new Rex tab; the master picks its level. /task [--rush|--oracle|--omnissiah] <text> | /task 1, 2 and 3 | /task 1 to 4",
 		handler: async (args, ctx) => {
 			let task = (args ?? "").trim();
 			const forced = task.match(/^--(rush|oracle|omnissiah)\s+/)?.[1] as Level | undefined;
 			if (forced) task = task.slice(forced.length + 3).trim();
-			if (!task) return ctx.ui.notify("Usage: /task [--rush|--oracle|--omnissiah] <description>", "warning");
+			if (!task) return ctx.ui.notify("Usage: /task [--rush|--oracle|--omnissiah] <description> | /task 1, 2 and 3 | /task 1 to 4", "warning");
 			if (!process.env.REX_SESSION || !process.env.REX_BLOCK) return ctx.ui.notify("/task needs a Rex pane.", "error");
 			if (!ctx.sessionManager.getSessionFile()) return ctx.ui.notify("/task needs a saved session to fork.", "error");
 
+			const numbers = parseTodoNumbers(task);
+			let tasks: string[] = [task];
+			if (numbers) {
+				const listPath = resolveTodoList(ctx.cwd);
+				if (!listPath) return ctx.ui.notify("No todo list declared for this folder.", "warning");
+				const items = readTodoItems(listPath);
+				const missing = numbers.filter((n) => !items.has(n));
+				if (missing.length) return ctx.ui.notify(`Todo items not found: ${missing.join(", ")}`, "warning");
+				tasks = numbers.map((n) => items.get(n)!);
+				if (forced && tasks.length > 1) return ctx.ui.notify("Level flags can't be combined with multi-task. Pick one item or drop the flag.", "warning");
+			}
+
 			if (forced) {
 				try {
-					ctx.ui.notify(await spawnTask(ctx, { task, level: forced }), "info");
+					ctx.ui.notify(await spawnTask(ctx, { task: tasks[0], level: forced }), "info");
 				} catch (err) {
 					ctx.ui.notify(`/task failed: ${(err as Error).message}`, "error");
 				}
 				return;
 			}
-			analysing = task;
-			if (ctx.isIdle()) pi.sendUserMessage(ANALYSIS(task));
-			else pi.sendUserMessage(ANALYSIS(task), { deliverAs: "followUp" });
+			analysing = { tasks };
+			pendingDelegations = [];
+			const prompt = tasks.length === 1 ? ANALYSIS(tasks[0]) : ANALYSIS_MULTI(tasks);
+			if (ctx.isIdle()) pi.sendUserMessage(prompt);
+			else pi.sendUserMessage(prompt, { deliverAs: "followUp" });
 		},
 	});
 
 	if (!TASK_ID) pi.registerTool({
 		name: "delegate_task",
 		label: "Delegate task",
-		description: "Only after a /task request: start the analysed task in a new tab at the chosen level. Call once, then stop.",
+		description: "Only after a /task request: start the analysed task(s) in new tabs at the chosen level. Call once per task, in order, as instructed by the request. Then stop.",
 		parameters: Type.Object({
 			level: StringEnum(LEVELS),
 			title: Type.String({ description: "2-5 words, ticket ID first if any" }),
@@ -356,25 +445,38 @@ export default function (pi: ExtensionAPI) {
 		}),
 		async execute(_id, params) {
 			if (!analysing) throw new Error("delegate_task is only valid right after a /task request");
-			pendingDelegation = { task: analysing, ...params };
-			analysing = undefined;
+			const total = analysing.tasks.length;
+			if (pendingDelegations.length >= total) throw new Error(`already delegated ${total} task${total === 1 ? "" : "s"}; stop now`);
+			const taskText = analysing.tasks[pendingDelegations.length];
+			pendingDelegations.push({ task: taskText, ...params });
+			const done = pendingDelegations.length;
+			const suffix = total === 1 ? "The tab opens when this turn ends. Stop now." : done === total ? `All ${total} queued. The tabs open when this turn ends. Stop now.` : `Queued ${done}/${total}. Continue with the next delegate_task call.`;
 			return {
-				content: [{ type: "text", text: `Queued ${LEVEL_ICON[params.level]} ${params.level}: ${params.title}. The tab opens when this turn ends. Stop now.` }],
+				content: [{ type: "text", text: `Queued ${LEVEL_ICON[params.level]} ${params.level}: ${params.title}. ${suffix}` }],
 				details: {},
 			};
 		},
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
+		const expected = analysing?.tasks.length ?? 0;
 		analysing = undefined; // a /task turn that never called delegate_task is dropped
-		const d = pendingDelegation;
-		if (!d) return;
-		pendingDelegation = undefined;
-		try {
-			const msg = await spawnTask(ctx, d);
-			pi.sendMessage({ customType: "task-status", content: msg, display: true }, { triggerTurn: false });
-		} catch (err) {
-			ctx.ui.notify(`/task failed: ${(err as Error).message}`, "error");
+		const delegations = pendingDelegations;
+		pendingDelegations = [];
+		if (!delegations.length) return;
+		if (expected > 1 && delegations.length < expected) {
+			pi.sendMessage(
+				{ customType: "task-status", content: `⚠️ /task expected ${expected} delegations but got ${delegations.length}. Spawning what came through.`, display: true },
+				{ triggerTurn: false },
+			);
+		}
+		for (const d of delegations) {
+			try {
+				const msg = await spawnTask(ctx, d);
+				pi.sendMessage({ customType: "task-status", content: msg, display: true }, { triggerTurn: false });
+			} catch (err) {
+				ctx.ui.notify(`/task failed: ${(err as Error).message}`, "error");
+			}
 		}
 	});
 
